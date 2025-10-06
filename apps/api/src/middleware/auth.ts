@@ -20,6 +20,7 @@ export function authMiddleware(req: AuthRequest, res: Response, next: NextFuncti
 
     req.userId = payload.sub;
     return next();
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
   } catch (err) {
     return res.status(401).json({ error: 'unauthenticated' });
   }
