@@ -2,20 +2,21 @@ import express from 'express';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import cookieParser from 'cookie-parser';
-import cors from 'cors'; // <-- add
+import cors from 'cors';
 import authRoutes from './routes/auth';
+import vaultRoutes from './routes/vault';
 
 dotenv.config();
 
 const app = express();
-
-// allow requests from frontend and allow cookies
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
-app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
 
+app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
+
 app.use('/api/auth', authRoutes);
+app.use('/api/vault', vaultRoutes);
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
