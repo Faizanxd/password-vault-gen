@@ -69,6 +69,8 @@ export default function VaultPage() {
   useEffect(() => {
     if (!vmk) return;
     loadItems();
+    // intentionally depend on vmk only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vmk]);
 
   // Build a tag list from decrypted items (used for filter UI)
@@ -180,16 +182,24 @@ export default function VaultPage() {
     setFiltered(base);
   }
 
+  // ---------- Robust loadItems() ----------
   async function loadItems() {
+    // guard: require vmk (should be present, but avoid races)
+    if (!vmk) {
+      console.warn('loadItems called without VMK');
+      return;
+    }
+
     setLoading(true);
     try {
+      // fetchVault() will throw on non-OK responses (our doFetch wrapper throws)
       const remote = await fetchVault();
 
-      // If the API returned an error object (not an array), handle it gracefully.
+      // Defensive: if remote isn't an array, handle gracefully
       if (!Array.isArray(remote)) {
         console.warn('fetchVault did not return an array:', remote);
 
-        // If the server indicates unauthenticated (or invalid token), clear VMK and redirect.
+        // handle unauthenticated / invalid_token specially
         if (remote && typeof remote === 'object' && (remote as any).error) {
           const errCode = (remote as any).error;
           if (errCode === 'unauthenticated' || errCode === 'invalid_token') {
@@ -199,7 +209,7 @@ export default function VaultPage() {
           }
         }
 
-        // Otherwise just treat as empty list
+        // fallback to empty list
         setItems([]);
         return;
       }
@@ -245,19 +255,20 @@ export default function VaultPage() {
     } catch (err: any) {
       console.error('loadItems error', err);
 
-      // If doFetch threw an error object with an error code, handle unauthenticated specially
+      // If the fetch wrapper threw an error object, handle unauthenticated redirect
       if (err && (err.error === 'unauthenticated' || err.error === 'invalid_token')) {
         sessionStorage.removeItem('vmk');
         router.replace('/login');
         return;
       }
 
-      // Optionally, you can set items to [] on general failure
+      // otherwise, leave items as-is or set to empty
       // setItems([]);
     } finally {
       setLoading(false);
     }
   }
+  // ---------- end loadItems() ----------
 
   // CRUD handlers (create/edit/delete) — incorporate tags and folder parsing
   async function handleCreateOrUpdate(e?: React.FormEvent) {
@@ -287,6 +298,7 @@ export default function VaultPage() {
       resetForm();
     } catch (err) {
       console.error('save item error', err);
+      // optionally: show UI error/toast here
     }
   }
 
@@ -354,6 +366,7 @@ export default function VaultPage() {
   // Keep filtered in sync on first load and when items change
   useEffect(() => {
     applyFilters();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items]);
 
   return (
