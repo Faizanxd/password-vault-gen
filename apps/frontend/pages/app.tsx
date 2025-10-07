@@ -184,6 +184,26 @@ export default function VaultPage() {
     setLoading(true);
     try {
       const remote = await fetchVault();
+
+      // If the API returned an error object (not an array), handle it gracefully.
+      if (!Array.isArray(remote)) {
+        console.warn('fetchVault did not return an array:', remote);
+
+        // If the server indicates unauthenticated (or invalid token), clear VMK and redirect.
+        if (remote && typeof remote === 'object' && (remote as any).error) {
+          const errCode = (remote as any).error;
+          if (errCode === 'unauthenticated' || errCode === 'invalid_token') {
+            sessionStorage.removeItem('vmk');
+            router.replace('/login');
+            return;
+          }
+        }
+
+        // Otherwise just treat as empty list
+        setItems([]);
+        return;
+      }
+
       const decrypted: DecryptedItem[] = [];
       for (const r of remote as RemoteItem[]) {
         try {
@@ -220,9 +240,20 @@ export default function VaultPage() {
           });
         }
       }
+
       setItems(decrypted);
-    } catch (err) {
+    } catch (err: any) {
       console.error('loadItems error', err);
+
+      // If doFetch threw an error object with an error code, handle unauthenticated specially
+      if (err && (err.error === 'unauthenticated' || err.error === 'invalid_token')) {
+        sessionStorage.removeItem('vmk');
+        router.replace('/login');
+        return;
+      }
+
+      // Optionally, you can set items to [] on general failure
+      // setItems([]);
     } finally {
       setLoading(false);
     }
