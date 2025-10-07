@@ -1,16 +1,56 @@
 :root {
-  color-scheme: light dark;
+  --bg: #ffffff;
+  --text: #111;
+  --muted: #666;
+  --card: #fff;
+}
+[data-theme='dark'] {
+  --bg: #0b1116;
+  --text: #e6eef6;
+  --muted: #9fb0c6;
+  --card: #071018;
+}
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+.card {
+  background: var(--card);
+  color: var(--text);
+}
+.small-muted {
+  color: var(--muted);
 }
 html,
 body,
 #__next {
   height: 100%;
   margin: 0;
-  font-family:
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    'Helvetica Neue',
-    Arial;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+}
+/* apps/frontend/styles/globals.css (append) */
+button {
+  background: #0b5fff;
+  color: white;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+button[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+input[type='range'] {
+  width: 100%;
+}
+input[readonly] {
+  background: #f7f7f8;
+  border: 1px solid #e6e6e6;
+  border-radius: 6px;
+}
+textarea {
+  min-height: 80px;
 }

@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import authRoutes from './routes/auth';
 import vaultRoutes from './routes/vault';
+import twoFaRoutes from './routes/2fa';
 
 dotenv.config();
 
@@ -17,6 +18,7 @@ app.use(cookieParser());
 
 app.use('/api/auth', authRoutes);
 app.use('/api/vault', vaultRoutes);
+app.use('/api/auth/2fa', twoFaRoutes);
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 

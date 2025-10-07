@@ -1,31 +1,61 @@
 // apps/frontend/pages/app.tsx
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { encryptItemWithVMK, decryptItemWithVMK } from '../lib/crypto';
 import { fetchVault, createVaultItem, updateVaultItem, deleteVaultItem, logout } from '../lib/api';
 import { useRouter } from 'next/router';
+import Fuse from 'fuse.js';
+import Generator from '../components/Generator';
+import TwoFactor from '../components/TwoFactor';
+import DarkToggle from '../components/DarkToggle';
 
+type RemoteItem = { id: string; encryptedBlob: string; createdAt: string; updatedAt: string };
 type DecryptedItem = {
   id: string;
   encryptedBlob: string;
   createdAt: string;
   updatedAt: string;
-  // plaintext fields:
   title: string;
   username?: string;
   password?: string;
   url?: string;
   notes?: string;
+  tags?: string[];
+  folder?: string;
 };
 
 export default function VaultPage() {
   const [vmk, setVmk] = useState<string | null>(null);
   const [items, setItems] = useState<DecryptedItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState({ title: '', username: '', password: '', url: '', notes: '' });
-  const [showPasswordIds, setShowPasswordIds] = useState<Record<string, boolean>>({});
-  const router = useRouter();
 
+  // form state (create/edit)
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    title: '',
+    username: '',
+    password: '',
+    url: '',
+    notes: '',
+    tagsText: '',
+    folder: '',
+  });
+
+  // Search + filter state
+  const [query, setQuery] = useState('');
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+  const [showOnlyTagged, setShowOnlyTagged] = useState(false);
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+
+  // Derived filtered result (what we actually render)
+  const [filtered, setFiltered] = useState<DecryptedItem[]>([]);
+
+  // UI state
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const router = useRouter();
+  const searchDebounceRef = useRef<number | null>(null);
+
+  // Load VMK and items
   useEffect(() => {
     const s = sessionStorage.getItem('vmk');
     if (!s) {
@@ -40,13 +70,121 @@ export default function VaultPage() {
     loadItems();
   }, [vmk]);
 
+  // Build a tag list from decrypted items (used for filter UI)
+  const allTags = useMemo(() => {
+    const set = new Set<string>();
+    for (const it of items) {
+      if (Array.isArray(it.tags)) for (const t of it.tags) if (t && t.trim()) set.add(t.trim());
+    }
+    return Array.from(set).sort();
+  }, [items]);
+
+  // Build folder list
+  const allFolders = useMemo(() => {
+    const set = new Set<string>();
+    for (const it of items) {
+      const f = (it.folder || '').trim();
+      if (f) set.add(f);
+    }
+    return Array.from(set).sort();
+  }, [items]);
+
+  // Fuse config (fuzzy search). Keys correspond to fields inside decrypted items.
+  const fuseIndex = useMemo(() => {
+    try {
+      return new Fuse(items, {
+        keys: ['title', 'username', 'url', 'notes'],
+        threshold: 0.35,
+        includeScore: true,
+        ignoreLocation: true,
+        minMatchCharLength: 1,
+      });
+    } catch {
+      return null;
+    }
+  }, [items]);
+
+  // Debounce typing, but apply immediately on toggles/items/folder changes
+  useEffect(() => {
+    if (searchDebounceRef.current) {
+      window.clearTimeout(searchDebounceRef.current);
+      searchDebounceRef.current = null;
+    }
+
+    const q = query.trim();
+    const shouldDebounce = q.length > 0;
+
+    if (shouldDebounce) {
+      searchDebounceRef.current = window.setTimeout(() => {
+        applyFilters();
+        searchDebounceRef.current = null;
+      }, 150);
+    } else {
+      applyFilters();
+    }
+
+    return () => {
+      if (searchDebounceRef.current) {
+        window.clearTimeout(searchDebounceRef.current);
+        searchDebounceRef.current = null;
+      }
+    };
+    // run when these change
+  }, [query, selectedTags, showOnlyTagged, items, selectedFolder]);
+
+  function applyFilters() {
+    const q = query.trim();
+    let base: DecryptedItem[] = items.slice();
+
+    // normalize tags for every item (trim & filter empties)
+    const normalizeTags = (it: DecryptedItem) =>
+      (it.tags ?? []).map((t) => String(t || '').trim()).filter(Boolean);
+
+    // Folder filter
+    if (selectedFolder) {
+      base = base.filter((it) => (it.folder || '').trim() === selectedFolder);
+    }
+
+    // Tag filter (applies before search)
+    if (selectedTags.size > 0 || showOnlyTagged) {
+      base = base.filter((it) => {
+        const tags = normalizeTags(it);
+        if (showOnlyTagged && tags.length === 0) return false;
+        if (selectedTags.size > 0) {
+          for (const t of Array.from(selectedTags)) {
+            if (!tags.includes(t)) return false;
+          }
+        }
+        return true;
+      });
+    }
+
+    // Search: use Fuse if available and query length > 0
+    if (q.length > 0 && fuseIndex) {
+      const results = fuseIndex.search(q);
+      const ids = new Set(results.map((r) => r.item.id));
+      base = base.filter((it) => ids.has(it.id));
+    } else if (q.length > 0) {
+      // Fallback: substring match (case-insensitive)
+      const lower = q.toLowerCase();
+      base = base.filter(
+        (it) =>
+          (it.title || '').toLowerCase().includes(lower) ||
+          (it.username || '').toLowerCase().includes(lower) ||
+          (it.url || '').toLowerCase().includes(lower) ||
+          (it.notes || '').toLowerCase().includes(lower)
+      );
+    }
+
+    setFiltered(base);
+  }
+
   async function loadItems() {
     setLoading(true);
     try {
       const remote = await fetchVault();
-      // remote is array of {id, encryptedBlob}
       const decrypted: DecryptedItem[] = [];
-      for (const r of remote as any[]) {
+      for (const r of remote as RemoteItem[]) {
         try {
           const plain = await decryptItemWithVMK(vmk!, r.encryptedBlob);
           decrypted.push({
@@ -59,9 +197,12 @@ export default function VaultPage() {
             password: plain.password || '',
             url: plain.url || '',
             notes: plain.notes || '',
+            tags: Array.isArray(plain.tags)
+              ? plain.tags.map((t: any) => String(t).trim()).filter(Boolean)
+              : [],
+            folder: (plain.folder || '').toString(),
           });
         } catch (err) {
-          // If decryption fails for an item, still include the ciphertext so user can debug later
           console.error('decrypt item failed', r.id, err);
           decrypted.push({
             id: r.id,
@@ -73,6 +214,8 @@ export default function VaultPage() {
             password: '',
             url: '',
             notes: '',
+            tags: [],
+            folder: '',
           });
         }
       }
@@ -84,20 +227,22 @@ export default function VaultPage() {
     }
   }
 
-  function resetForm() {
-    setEditingId(null);
-    setForm({ title: '', username: '', password: '', url: '', notes: '' });
-  }
-
+  // CRUD handlers (create/edit/delete) — incorporate tags and folder parsing
   async function handleCreateOrUpdate(e?: React.FormEvent) {
     if (e) e.preventDefault();
     if (!vmk) return;
+    const tags = form.tagsText
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
     const payload = {
       title: form.title || '',
       username: form.username || '',
       password: form.password || '',
       url: form.url || '',
       notes: form.notes || '',
+      tags,
+      folder: form.folder || '',
     };
     const encryptedBlob = await encryptItemWithVMK(vmk, payload);
     try {
@@ -113,6 +258,19 @@ export default function VaultPage() {
     }
   }
 
+  function resetForm() {
+    setEditingId(null);
+    setForm({
+      title: '',
+      username: '',
+      password: '',
+      url: '',
+      notes: '',
+      tagsText: '',
+      folder: '',
+    });
+  }
+
   function startEdit(item: DecryptedItem) {
     setEditingId(item.id);
     setForm({
@@ -121,6 +279,8 @@ export default function VaultPage() {
       password: item.password || '',
       url: item.url || '',
       notes: item.notes || '',
+      tagsText: (item.tags || []).join(', '),
+      folder: item.folder || '',
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -141,19 +301,87 @@ export default function VaultPage() {
     router.push('/');
   }
 
-  function toggleShowPassword(id: string) {
-    setShowPasswordIds((s) => ({ ...s, [id]: !s[id] }));
+  // Tag filter toggles
+  function toggleTag(t: string) {
+    setSelectedTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(t)) next.delete(t);
+      else next.add(t);
+      return next;
+    });
   }
+
+  // Clear search & filters
+  function clearFilters() {
+    setQuery('');
+    setSelectedTags(new Set());
+    setShowOnlyTagged(false);
+    setSelectedFolder(null);
+  }
+
+  // Keep filtered in sync on first load and when items change
+  useEffect(() => {
+    applyFilters();
+  }, [items]);
 
   return (
     <main style={{ padding: 20 }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1>Password Vault</h1>
-        <div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <small style={{ marginRight: 6 }}>Folder:</small>
+            <select
+              value={selectedFolder ?? ''}
+              onChange={(e) => setSelectedFolder(e.target.value || null)}
+              aria-label="Filter by folder"
+            >
+              <option value="">All</option>
+              {allFolders.map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <button onClick={() => setSettingsOpen((s) => !s)} aria-pressed={settingsOpen}>
+            {settingsOpen ? 'Close settings' : 'Settings'}
+          </button>
+
+          <div style={{ minWidth: 160 }}>
+            <h3 style={{ marginTop: 0 }}>Appearance</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <DarkToggle />
+              <div style={{ fontSize: 13, color: '#666' }}>Toggle dark mode</div>
+            </div>
+          </div>
           <button onClick={handleLogout}>Logout</button>
         </div>
       </header>
 
+      {/* Settings panel (simple inline panel) */}
+      {settingsOpen && (
+        <section
+          style={{
+            marginTop: 12,
+            padding: 12,
+            border: '1px solid #e6e6e6',
+            borderRadius: 8,
+            maxWidth: 900,
+          }}
+        >
+          <h2>Settings</h2>
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <div style={{ minWidth: 280 }}>
+              <h3 style={{ marginTop: 0 }}>Two-Factor (TOTP)</h3>
+              <TwoFactor />
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Editor */}
       <section style={{ marginTop: 16 }}>
         <h2>{editingId ? 'Edit item' : 'Add new item'}</h2>
         <form onSubmit={handleCreateOrUpdate} style={{ display: 'grid', gap: 8, maxWidth: 640 }}>
@@ -183,6 +411,17 @@ export default function VaultPage() {
             value={form.notes}
             onChange={(e) => setForm({ ...form, notes: e.target.value })}
           />
+          <input
+            placeholder="Tags (comma separated)"
+            value={form.tagsText}
+            onChange={(e) => setForm({ ...form, tagsText: e.target.value })}
+          />
+          <input
+            placeholder="Folder (optional)"
+            value={form.folder}
+            onChange={(e) => setForm({ ...form, folder: e.target.value })}
+          />
+
           <div>
             <button type="submit">{editingId ? 'Save changes' : 'Add item'}</button>
             {editingId && (
@@ -194,14 +433,76 @@ export default function VaultPage() {
         </form>
       </section>
 
+      {/* Generator (prefills password field) */}
+      <div style={{ marginTop: 16 }}>
+        <Generator onGenerate={(pwd) => setForm((f) => ({ ...f, password: pwd }))} />
+      </div>
+
+      {/* Search & filters */}
+      <section style={{ marginTop: 24, maxWidth: 900 }}>
+        <h2>Search & Filters</h2>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+          <input
+            placeholder="Search title, username, URL, notes..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            style={{ flex: 1, padding: 8 }}
+            aria-label="Search vault items"
+          />
+          <button onClick={() => setQuery('')}>Clear</button>
+          <button onClick={() => clearFilters()} style={{ marginLeft: 8 }}>
+            Reset
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input
+              type="checkbox"
+              checked={showOnlyTagged}
+              onChange={(e) => setShowOnlyTagged(e.target.checked)}
+            />
+            Show only items with tags
+          </label>
+
+          {allTags.length > 0 ? (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {allTags.map((t) => (
+                <label
+                  key={t}
+                  style={{
+                    display: 'flex',
+                    gap: 6,
+                    alignItems: 'center',
+                    background: selectedTags.has(t) ? '#eef' : 'transparent',
+                    padding: '4px 6px',
+                    borderRadius: 6,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedTags.has(t)}
+                    onChange={() => toggleTag(t)}
+                  />
+                  {t}
+                </label>
+              ))}
+            </div>
+          ) : (
+            <div style={{ color: '#666' }}>No tags yet</div>
+          )}
+        </div>
+      </section>
+
+      {/* Vault List */}
       <section style={{ marginTop: 24 }}>
         <h2>Vault</h2>
         {loading ? (
           <div>Loading...</div>
         ) : (
           <div style={{ display: 'grid', gap: 12 }}>
-            {items.length === 0 && <div>No items yet.</div>}
-            {items.map((it) => (
+            {filtered.length === 0 && <div>No items match your search/filters.</div>}
+            {filtered.map((it) => (
               <div
                 key={it.id}
                 style={{ border: '1px solid #e2e2e2', padding: 12, borderRadius: 8 }}
@@ -217,18 +518,14 @@ export default function VaultPage() {
                     </button>
                   </div>
                 </div>
+
                 <div style={{ marginTop: 8 }}>
                   <div>
                     <small>Username:</small> <code>{it.username}</code>
                   </div>
                   <div style={{ marginTop: 6 }}>
-                    <small>Password:</small>{' '}
-                    <code>
-                      {showPasswordIds[it.id] ? it.password : it.password ? '••••••••' : ''}
-                    </code>
-                    <button onClick={() => toggleShowPassword(it.id)} style={{ marginLeft: 8 }}>
-                      {showPasswordIds[it.id] ? 'Hide' : 'Reveal'}
-                    </button>
+                    <small>Password:</small>
+                    <code>{it.password ? '••••••••' : ''}</code>
                   </div>
                   <div style={{ marginTop: 6 }}>
                     <small>URL:</small>{' '}
@@ -242,9 +539,46 @@ export default function VaultPage() {
                       <div>{it.notes}</div>
                     </div>
                   )}
+
+                  {/* Folder */}
+                  {it.folder && it.folder.trim() && (
+                    <div style={{ marginTop: 6 }}>
+                      <small>Folder:</small>
+                      <div style={{ fontSize: 13, marginTop: 4 }}>{it.folder}</div>
+                    </div>
+                  )}
+
+                  {/* Tags */}
+                  {it.tags && it.tags.length > 0 && (
+                    <div style={{ marginTop: 6 }}>
+                      <small>Tags:</small>
+                      <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                        {it.tags.map((rawTag) => {
+                          const t = String(rawTag || '').trim();
+                          if (!t) return null;
+                          return (
+                            <span
+                              key={t}
+                              style={{
+                                background: '#f2f6ff',
+                                color: '#0b3b82',
+                                padding: '3px 8px',
+                                borderRadius: 6,
+                                fontSize: 12,
+                                display: 'inline-block',
+                              }}
+                            >
+                              {t}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
+
                 <details style={{ marginTop: 8 }}>
-                  <summary style={{ cursor: 'pointer' }}>Encrypted blob (for debug)</summary>
+                  <summary style={{ cursor: 'pointer' }}>Encrypted blob (debug)</summary>
                   <pre style={{ maxWidth: 800, overflowX: 'auto' }}>{it.encryptedBlob}</pre>
                 </details>
               </div>
