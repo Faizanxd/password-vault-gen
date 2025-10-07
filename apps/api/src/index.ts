@@ -1,18 +1,16 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 // apps/api/src/index.ts
-import express, { Request, Response } from 'express';
+import express, { Request, Response, RequestHandler } from 'express';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
-import authRoutes from './routes/auth';
-import vaultRoutes from './routes/vault';
-import twoFaRoutes from './routes/2fa';
 
 dotenv.config();
 
 const app = express();
 
-// Allow multiple origins (comma-separated) or a single origin string
+// Accept a comma-separated FRONTEND_ORIGIN env var or a single origin
 const FRONTEND_ORIGIN_RAW = process.env.FRONTEND_ORIGIN || 'https://frontendpassgen.netlify.app';
 const FRONTEND_ORIGINS = FRONTEND_ORIGIN_RAW.split(',')
   .map((s) => s.trim())
@@ -22,16 +20,25 @@ app.use(
   cors({
     origin: FRONTEND_ORIGINS.length === 1 ? FRONTEND_ORIGINS[0] : FRONTEND_ORIGINS,
     credentials: true,
-  })
+  }) as unknown as RequestHandler
 );
 
 app.use(express.json());
-app.use(cookieParser());
+// <-- explicit cast so TypeScript doesn't try to match ambiguous app.use overloads
+app.use(cookieParser() as unknown as RequestHandler);
 
-// Cast routers to express.Router to make TypeScript select the correct overload
-app.use('/api/auth', authRoutes as unknown as express.Router);
-app.use('/api/vault', vaultRoutes as unknown as express.Router);
-app.use('/api/auth/2fa', twoFaRoutes as unknown as express.Router);
+/**
+ * Route imports via require() (returns `any`) to avoid TypeScript overload ambiguity.
+ * If you later make each route file explicitly export `Router` typed objects, you can
+ * switch back to `import authRoutes from './routes/auth'` without casting.
+ */
+const authRoutes: any = require('./routes/auth').default ?? require('./routes/auth');
+const vaultRoutes: any = require('./routes/vault').default ?? require('./routes/vault');
+const twoFaRoutes: any = require('./routes/2fa').default ?? require('./routes/2fa');
+
+app.use('/api/auth', authRoutes);
+app.use('/api/vault', vaultRoutes);
+app.use('/api/auth/2fa', twoFaRoutes);
 
 app.get('/health', (_req: Request, res: Response) => res.json({ ok: true }));
 
