@@ -7,6 +7,7 @@ import Fuse from 'fuse.js';
 import Generator from '../components/Generator';
 import TwoFactor from '../components/TwoFactor';
 import DarkToggle from '../components/DarkToggle';
+import ExportImport from '../components/ExportImport';
 
 type RemoteItem = { id: string; encryptedBlob: string; createdAt: string; updatedAt: string };
 type DecryptedItem = {
@@ -350,10 +351,8 @@ export default function VaultPage() {
           </button>
 
           <div style={{ minWidth: 160 }}>
-            <h3 style={{ marginTop: 0 }}>Appearance</h3>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <DarkToggle />
-              <div style={{ fontSize: 13, color: '#666' }}>Toggle dark mode</div>
             </div>
           </div>
           <button onClick={handleLogout}>Logout</button>
@@ -376,6 +375,20 @@ export default function VaultPage() {
             <div style={{ minWidth: 280 }}>
               <h3 style={{ marginTop: 0 }}>Two-Factor (TOTP)</h3>
               <TwoFactor />
+            </div>
+            <div style={{ minWidth: 280 }}>
+              <h3 style={{ marginTop: 0 }}>Export / Import</h3>
+
+              <ExportImport
+                onImported={async () => {
+                  // call your loadItems function to refresh items
+                  try {
+                    await loadItems();
+                  } catch (e) {
+                    console.warn('refresh after import failed', e);
+                  }
+                }}
+              />
             </div>
           </div>
         </section>
