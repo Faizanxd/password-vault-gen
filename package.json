@@ -40,7 +40,7 @@
     "eslint": "^8.57.1",
     "husky": "^8.0.3",
     "jest": "^30.2.0",
-    "lint-staged": "^13.3.0",
+    "lint-staged": "^16.2.3",
     "mongodb-memory-server-core": "^10.2.2",
     "playwright": "^1.56.0",
     "prettier": "^2.8.8",

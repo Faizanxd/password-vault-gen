@@ -82,7 +82,7 @@ async function aesGcmDecrypt(key: CryptoKey, ivB64: string, ctB64: string) {
 export async function exportVaultToFile(opts?: { exportPassphrase?: string; filename?: string }) {
   // Get server-side encryptedVMK from /api/auth/me or from sessionStorage's vmk? We'll include the server's encryptedVMK
   // Easiest: include sessionStorage vmk re-encrypted with passphrase OR include server encryptedVMK (we include both cases)
-  const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+  const API = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '');
   // Fetch vault list
   const blobs = await fetchVault(); // array of { id, encryptedBlob, createdAt, updatedAt }
 

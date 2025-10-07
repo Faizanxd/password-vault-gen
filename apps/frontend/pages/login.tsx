@@ -3,7 +3,7 @@ import { useRouter } from 'next/router';
 import { login } from '../lib/api';
 import { decryptVMK } from '../lib/crypto';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+const API = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '');
 
 export default function Login() {
   const [email, setEmail] = useState('');

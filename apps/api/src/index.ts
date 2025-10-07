@@ -4,33 +4,48 @@ import express, { Request, Response, RequestHandler } from 'express';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import cookieParser from 'cookie-parser';
-import cors from 'cors';
+import cors, { CorsOptions } from 'cors';
 
 dotenv.config();
 
 const app = express();
 
-// Accept a comma-separated FRONTEND_ORIGIN env var or a single origin
-const FRONTEND_ORIGIN_RAW = process.env.FRONTEND_ORIGIN || 'https://frontendpassgen.netlify.app';
-const FRONTEND_ORIGINS = FRONTEND_ORIGIN_RAW.split(',')
+// normalize allowed origins from env (comma-separated) and strip trailing slash
+const raw = process.env.FRONTEND_ORIGIN || 'https://frontendpassgen.netlify.app';
+const allowedOrigins = raw
+  .split(',')
   .map((s) => s.trim())
-  .filter(Boolean);
+  .filter(Boolean)
+  .map((s) => s.replace(/\/+$/, ''));
 
-app.use(
-  cors({
-    origin: FRONTEND_ORIGINS.length === 1 ? FRONTEND_ORIGINS[0] : FRONTEND_ORIGINS,
-    credentials: true,
-  }) as unknown as RequestHandler
-);
+// Build a CorsOptions where `origin` is a delegate (origin, callback) => void
+const corsOptions: CorsOptions = {
+  origin: (origin, callback) => {
+    // allow requests with no origin (e.g. server-to-server/curl)
+    if (!origin) return callback(null, true);
+
+    const normalized = origin.replace(/\/+$/, '');
+    if (allowedOrigins.includes(normalized)) return callback(null, true);
+
+    // explicit rejection - browser will block
+    return callback(new Error(`Origin ${origin} not allowed by CORS`));
+  },
+  credentials: true,
+  optionsSuccessStatus: 200,
+};
+
+// apply CORS
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // handle preflight
 
 app.use(express.json());
-// <-- explicit cast so TypeScript doesn't try to match ambiguous app.use overloads
+// cookieParser() has a middleware type; cast to RequestHandler to satisfy overload resolution
 app.use(cookieParser() as unknown as RequestHandler);
 
 /**
- * Route imports via require() (returns `any`) to avoid TypeScript overload ambiguity.
- * If you later make each route file explicitly export `Router` typed objects, you can
- * switch back to `import authRoutes from './routes/auth'` without casting.
+ * Use require() to import route modules (returns `any`) to avoid TypeScript overload
+ * issues we've hit previously. If you later make each route file export a typed
+ * `express.Router`, you can switch back to static imports without require().
  */
 const authRoutes: any = require('./routes/auth').default ?? require('./routes/auth');
 const vaultRoutes: any = require('./routes/vault').default ?? require('./routes/vault');
