@@ -10,6 +10,17 @@ const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 const COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'pv_session';
 const COOKIE_SECURE = process.env.NODE_ENV === 'production';
 
+// cookie options used for setting & clearing the session cookie.
+// In production we use SameSite=None and Secure so the cookie is accepted in cross-site contexts.
+const COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
+const cookieOptions = {
+  httpOnly: true,
+  secure: COOKIE_SECURE,
+  sameSite: COOKIE_SECURE ? ('none' as const) : ('lax' as const),
+  maxAge: COOKIE_MAX_AGE,
+  // domain: process.env.SESSION_COOKIE_DOMAIN || undefined, // optional: set if you need subdomain sharing
+};
+
 // helper to sign session token
 function signSession(userId: string) {
   return jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: '7d' });
@@ -31,12 +42,8 @@ router.post('/signup', async (req, res) => {
     await user.save();
 
     const token = signSession(user._id.toString());
-    res.cookie(COOKIE_NAME, token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: COOKIE_SECURE,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    // set cookie with shared cookieOptions
+    res.cookie(COOKIE_NAME, token, cookieOptions);
 
     return res.status(201).json({ ok: true });
   } catch (err) {
@@ -57,25 +64,20 @@ router.post('/login', async (req, res) => {
     const user = await User.findOne({ email }).lean();
     if (!user) return res.status(401).json({ error: 'invalid_credentials' });
 
-    const valid = await argon2.verify(user.passwordHash, password);
+    const valid = await argon2.verify((user as any).passwordHash, password);
     if (!valid) return res.status(401).json({ error: 'invalid_credentials' });
 
     // If user has 2FA enabled, return a short-lived loginToken for the next step
-    if (user.totpEnabled && user.totpSecretEncrypted) {
-      const loginToken = jwt.sign({ sub: user._id.toString(), twoFa: true }, JWT_SECRET, {
+    if ((user as any).totpEnabled && (user as any).totpSecretEncrypted) {
+      const loginToken = jwt.sign({ sub: (user as any)._id.toString(), twoFa: true }, JWT_SECRET, {
         expiresIn: '300s',
       });
       return res.json({ requires2FA: true, loginToken });
     }
 
     // No 2FA: finish login normally, set session cookie and return encryptedVMK
-    const token = signSession(user._id.toString());
-    res.cookie(COOKIE_NAME, token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: COOKIE_SECURE,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    const token = signSession((user as any)._id.toString());
+    res.cookie(COOKIE_NAME, token, cookieOptions);
 
     return res.json({ encryptedVMK: (user as any).encryptedVMK });
   } catch (err) {
@@ -107,7 +109,8 @@ router.get('/me', async (req, res) => {
 
 // POST /api/auth/logout
 router.post('/logout', (req, res) => {
-  res.clearCookie(COOKIE_NAME);
+  // clear cookie with the same options to ensure the browser removes it
+  res.clearCookie(COOKIE_NAME, cookieOptions);
   res.json({ ok: true });
 });
 

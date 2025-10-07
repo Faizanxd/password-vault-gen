@@ -1,18 +1,46 @@
+// apps/frontend/lib/api.ts
 const API = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '');
 
 async function doFetch(path: string, opts: RequestInit = {}) {
-  const res = await fetch(`${API}${path}`, {
+  const url = `${API}${path}`;
+  const headers: Record<string, string> = {
+    ...(opts.headers ? (opts.headers as Record<string, string>) : {}),
+  };
+
+  // If there's a body and no Content-Type specified, default to JSON
+  if (opts.body && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const res = await fetch(url, {
+    credentials: 'include', // important: send cookies for auth
     ...opts,
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(opts.headers || {}),
-    },
+    headers,
   });
+
+  const text = await res.text();
   const contentType = res.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) return res.json();
-  // return raw text (for 204 or other)
-  return res.text();
+
+  // parse JSON body if present
+  let body: any = null;
+  if (text && contentType.includes('application/json')) {
+    try {
+      body = JSON.parse(text);
+    } catch (err) {
+      // invalid JSON — keep raw text
+      body = text;
+    }
+  } else if (text) {
+    body = text;
+  }
+
+  if (!res.ok) {
+    // throw the error object or a fallback
+    const err = body || { error: `HTTP ${res.status}` };
+    throw err;
+  }
+
+  return body;
 }
 
 /* Auth */
@@ -34,9 +62,12 @@ export function logout() {
 
 /* Vault endpoints */
 export async function fetchVault() {
-  return doFetch('/api/vault', { method: 'GET' }) as Promise<
-    Array<{ id: string; encryptedBlob: string; createdAt: string; updatedAt: string }>
-  >;
+  return (await doFetch('/api/vault', { method: 'GET' })) as Array<{
+    id: string;
+    encryptedBlob: string;
+    createdAt: string;
+    updatedAt: string;
+  }>;
 }
 
 export async function createVaultItem(encryptedBlob: string) {
