@@ -59,6 +59,34 @@ export function login(email: string, password: string) {
 export function logout() {
   return doFetch('/api/auth/logout', { method: 'POST' });
 }
+// add near other exports in apps/frontend/lib/api.ts
+
+// 2FA endpoints
+export async function setup2fa() {
+  return doFetch('/api/auth/2fa/setup', { method: 'POST' });
+}
+
+export async function confirm2fa(tempToken: string, code: string) {
+  return doFetch('/api/auth/2fa/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ tempToken, code }),
+  });
+}
+
+export async function disable2fa(code: string) {
+  return doFetch('/api/auth/2fa/disable', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  });
+}
+
+// Used when login returns { requires2FA: true, loginToken } — frontend should call this:
+export async function login2faVerify(loginToken: string, code: string) {
+  return doFetch('/api/auth/2fa/login-verify', {
+    method: 'POST',
+    body: JSON.stringify({ loginToken, code }),
+  });
+}
 
 /* Vault endpoints */
 export async function fetchVault() {
