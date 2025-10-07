@@ -4,6 +4,7 @@
 
 * Frontend: [https://frontendpassgen.netlify.app/](https://frontendpassgen.netlify.app/)
 * Backend: [https://password-vault-gen.onrender.com](https://password-vault-gen.onrender.com)
+* Recording : https://drive.google.com/file/d/1KW5jeFuOoQ-TF4VTpUKBU2hZbY_DxilH/view?usp=sharing
 
 > ⚠️ Backend may go to sleep on the Render free tier — the first request after idle can be slow or trigger a cold start.
 
