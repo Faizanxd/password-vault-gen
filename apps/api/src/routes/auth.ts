@@ -8,17 +8,19 @@ dotenv.config();
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 const COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'pv_session';
-const COOKIE_SECURE = process.env.NODE_ENV === 'production';
-
+const COOKIE_SECURE = process.env.COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production';
+const COOKIE_SAMESITE =
+  (process.env.COOKIE_SAMESITE as 'none' | 'lax' | 'strict' | undefined) ||
+  (COOKIE_SECURE ? 'none' : 'lax');
 // cookie options used for setting & clearing the session cookie.
 // In production we use SameSite=None and Secure so the cookie is accepted in cross-site contexts.
 const COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 const cookieOptions = {
   httpOnly: true,
   secure: COOKIE_SECURE,
-  sameSite: COOKIE_SECURE ? ('none' as const) : ('lax' as const),
+  sameSite: COOKIE_SAMESITE,
   maxAge: COOKIE_MAX_AGE,
-  // domain: process.env.SESSION_COOKIE_DOMAIN || undefined, // optional: set if you need subdomain sharing
+  // domain: process.env.SESSION_COOKIE_DOMAIN || undefined, // optional
 };
 
 // helper to sign session token
