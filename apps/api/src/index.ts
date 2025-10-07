@@ -10,7 +10,7 @@ import twoFaRoutes from './routes/2fa';
 dotenv.config();
 
 const app = express();
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
+const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'https://frontendpassgen.netlify.app';
 
 app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
 app.use(express.json());
